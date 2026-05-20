@@ -17,6 +17,9 @@
   "entrypoints": {
     "main": [
       "com.kestalkayden.concretemixer.ConcreteMixerFabric"
+    ],
+    "client": [
+      "com.kestalkayden.concretemixer.client.ConcreteMixerClient"
     ]
   },
   "depends": {

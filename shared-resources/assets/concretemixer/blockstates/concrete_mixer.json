@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=north,lit=false": { "model": "concretemixer:block/concrete_mixer" },
+    "facing=south,lit=false": { "model": "concretemixer:block/concrete_mixer", "y": 180 },
+    "facing=east,lit=false":  { "model": "concretemixer:block/concrete_mixer", "y": 90 },
+    "facing=west,lit=false":  { "model": "concretemixer:block/concrete_mixer", "y": 270 },
+    "facing=north,lit=true":  { "model": "concretemixer:block/concrete_mixer_on" },
+    "facing=south,lit=true":  { "model": "concretemixer:block/concrete_mixer_on", "y": 180 },
+    "facing=east,lit=true":   { "model": "concretemixer:block/concrete_mixer_on", "y": 90 },
+    "facing=west,lit=true":   { "model": "concretemixer:block/concrete_mixer_on", "y": 270 }
+  }
+}
