@@ -1,0 +1,1 @@
+A single-block concrete factory. Drop in sand, gravel, and dye (or concrete powder) plus water — get colored concrete blocks. Furnace-style, no power required.
