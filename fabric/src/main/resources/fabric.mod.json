@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "concretemixer",
+  "version": "${version}",
+  "name": "Concrete Mixer",
+  "description": "A concrete mixer block — combines sand/gravel/dye (or concrete powder) with water from an internal tank to produce colored concrete blocks.",
+  "authors": [
+    "Kestalkayden"
+  ],
+  "contact": {
+    "homepage": "https://github.com/kestalkayden/concrete-mixer",
+    "sources": "https://github.com/kestalkayden/concrete-mixer"
+  },
+  "license": "CC0-1.0",
+  "icon": "icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.kestalkayden.concretemixer.ConcreteMixerFabric"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*",
+    "minecraft": ">=26.1 <26.2",
+    "java": ">=25"
+  }
+}
