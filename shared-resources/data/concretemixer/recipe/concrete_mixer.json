@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "C": "minecraft:cauldron"
+  },
+  "pattern": [
+    "III",
+    "ICI",
+    "III"
+  ],
+  "result": {
+    "id": "concretemixer:concrete_mixer"
+  }
+}

@@ -7,6 +7,9 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponentGetter;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.ItemTags;
@@ -15,9 +18,11 @@ import net.minecraft.world.WorldlyContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.DyeColor;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -158,6 +163,17 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         BlockState current = getBlockState();
         if (current.getValue(ConcreteMixerBlock.LIT) != shouldBeLit) {
             level.setBlock(pos, current.setValue(ConcreteMixerBlock.LIT, shouldBeLit), Block.UPDATE_ALL);
+        }
+
+        // Cosmetic: thin steam wisp rising from top-center while mixing. Every 6 ticks (~3.3/s)
+        // gives a near-continuous plume since WHITE_SMOKE lingers ~30 ticks. Tight cluster + slow
+        // upward drift reads as "machine running" rather than ambient pops.
+        if (shouldBeLit && progress % 6 == 0) {
+            level.sendParticles(ParticleTypes.WHITE_SMOKE,
+                pos.getX() + 0.5, pos.getY() + 1.02, pos.getZ() + 0.5,
+                1,                    // count
+                0.05, 0.0, 0.05,      // tight horizontal spread, no y spread
+                0.005);               // very slow random velocity — particle's own upward drift carries it
         }
 
         if (changed) {
@@ -333,6 +349,20 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         this.waterMb = Math.max(0, Math.min(TANK_CAPACITY_MB, input.getIntOr("WaterMb", 0)));
         this.progress = Math.max(0, input.getIntOr("Progress", 0));
         this.powered = input.getBooleanOr("Powered", false);
+    }
+
+    // --- Data components (preserve inventory across break/place via loot table copy_components) ---
+
+    @Override
+    protected void collectImplicitComponents(DataComponentMap.Builder components) {
+        super.collectImplicitComponents(components);
+        components.set(DataComponents.CONTAINER, ItemContainerContents.fromItems(this.items));
+    }
+
+    @Override
+    protected void applyImplicitComponents(DataComponentGetter componentGetter) {
+        super.applyImplicitComponents(componentGetter);
+        componentGetter.getOrDefault(DataComponents.CONTAINER, ItemContainerContents.EMPTY).copyInto(this.items);
     }
 
     // --- WorldlyContainer ---

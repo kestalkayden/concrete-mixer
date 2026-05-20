@@ -66,10 +66,23 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
         this.beContainer = beContainer;
         this.data = data;
 
+        // 3 input slots, top row. mayPlace delegates to BE.canPlaceItem so non-recipe items
+        // (cobble, sandstone, etc.) get rejected for drag/drop AND moveItemStackTo (shift-click).
+        // Vanilla Slot.mayPlace returns true unconditionally — it does NOT call canPlaceItem —
+        // so without this override the slot-level filter is bypassed entirely.
         for (int i = 0; i < 3; i++) {
-            addSlot(new Slot(beContainer, i, INPUT_X_START + i * 18, INPUT_ROW_Y));
+            final int slotId = i;
+            addSlot(new Slot(beContainer, slotId, INPUT_X_START + i * 18, INPUT_ROW_Y) {
+                @Override public boolean mayPlace(ItemStack stack) {
+                    return beContainer.canPlaceItem(slotId, stack);
+                }
+            });
         }
-        addSlot(new Slot(beContainer, ConcreteMixerBlockEntity.SLOT_WATER, WATER_SLOT_X, WATER_SLOT_Y));
+        addSlot(new Slot(beContainer, ConcreteMixerBlockEntity.SLOT_WATER, WATER_SLOT_X, WATER_SLOT_Y) {
+            @Override public boolean mayPlace(ItemStack stack) {
+                return beContainer.canPlaceItem(ConcreteMixerBlockEntity.SLOT_WATER, stack);
+            }
+        });
         addSlot(new Slot(beContainer, ConcreteMixerBlockEntity.SLOT_OUTPUT, OUTPUT_SLOT_X, OUTPUT_SLOT_Y) {
             @Override public boolean mayPlace(ItemStack stack) { return false; }
         });
