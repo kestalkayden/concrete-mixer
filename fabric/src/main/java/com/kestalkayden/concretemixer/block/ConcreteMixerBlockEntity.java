@@ -18,11 +18,20 @@ import net.minecraft.world.WorldlyContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.DyeColor;
+import net.fabricmc.fabric.api.transfer.v1.context.ContainerItemContext;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant;
+import net.fabricmc.fabric.api.transfer.v1.item.ContainerStorage;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleSlotStorage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -136,6 +145,17 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
     public int getProgress() { return progress; }
     public int getActiveMixTicks() { return activeMixTicks; }
 
+    /** Adds water to the tank, clamped to [0, TANK_CAPACITY_MB]. Negative amount drains.
+     *  Marks the BE dirty on any actual change. Used by the external fluid capability so pipe
+     *  mods (Pipez, etc.) and HUD mods (Jade) can read/write the tank. */
+    public void addWaterMb(int amount) {
+        int newAmount = Math.max(0, Math.min(TANK_CAPACITY_MB, waterMb + amount));
+        if (newAmount != waterMb) {
+            waterMb = newAmount;
+            setChanged();
+        }
+    }
+
     /** Status enum sent to the menu/screen for the GUI status line.
      *  Kept as ints since ContainerData can only sync shorts. */
     public static final int STATUS_IDLE = 0;
@@ -187,7 +207,7 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         if (powered) return;
 
         boolean changed = false;
-        if (tryDrainBucket()) changed = true;
+        if (tryDrainWater()) changed = true;
 
         Optional<DyeColor> rawColor = tryMatchRawRecipe();
         Optional<DyeColor> powderColor = rawColor.isPresent() ? Optional.empty() : tryMatchPowderRecipe();
@@ -335,20 +355,47 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         }
     }
 
-    /** Drains one water bucket from the water slot into the tank, replacing with an empty bucket.
-     *  Returns true iff a fill happened. Water buckets are max-stack-1, so the count==1 branch
-     *  is the normal case; the else exists for defense against modded behavior. */
-    private boolean tryDrainBucket() {
+    /** Drains water from the water slot into the tank. Returns true iff any mB was added.
+     *  Two paths:
+     *    1. Vanilla water bucket → fast path, atomic 1000 mB swap to empty bucket.
+     *    2. Any item with a Fabric fluid storage capability containing water (Tech Reborn cells,
+     *       Mekanism portable tanks, etc.) → extract up to remaining tank capacity via the
+     *       transfer API. The ContainerItemContext handles transforming the item as fluid drains. */
+    private boolean tryDrainWater() {
         ItemStack stack = items.get(SLOT_WATER);
-        if (stack.isEmpty() || !stack.is(Items.WATER_BUCKET)) return false;
-        if (waterMb + 1000 > TANK_CAPACITY_MB) return false;
-        if (stack.getCount() == 1) {
-            items.set(SLOT_WATER, new ItemStack(Items.BUCKET));
-        } else {
-            stack.shrink(1);
+        if (stack.isEmpty()) return false;
+        int roomMb = TANK_CAPACITY_MB - waterMb;
+        if (roomMb <= 0) return false;
+
+        // Path A: vanilla water bucket — no transaction overhead.
+        if (stack.is(Items.WATER_BUCKET) && roomMb >= 1000) {
+            if (stack.getCount() == 1) {
+                items.set(SLOT_WATER, new ItemStack(Items.BUCKET));
+            } else {
+                stack.shrink(1);
+            }
+            waterMb += 1000;
+            return true;
         }
-        waterMb += 1000;
-        return true;
+
+        // Path B: any item exposing a fluid storage with water. The slot-context wrapper lets
+        // the source item transform itself (water cell → empty cell, etc.) on commit.
+        SingleSlotStorage<ItemVariant> slotStorage = ContainerStorage.of(this, null).getSlot(SLOT_WATER);
+        ContainerItemContext ctx = ContainerItemContext.ofSingleSlot(slotStorage);
+        Storage<FluidVariant> fluidStorage = ctx.find(FluidStorage.ITEM);
+        if (fluidStorage == null) return false;
+
+        long roomDroplets = roomMb * (long) (net.fabricmc.fabric.api.transfer.v1.fluid.FluidConstants.BUCKET / 1000);
+        try (Transaction tx = Transaction.openOuter()) {
+            long extracted = fluidStorage.extract(FluidVariant.of(Fluids.WATER), roomDroplets, tx);
+            long extractedMb = extracted / (net.fabricmc.fabric.api.transfer.v1.fluid.FluidConstants.BUCKET / 1000);
+            if (extractedMb > 0) {
+                tx.commit();
+                addWaterMb((int) extractedMb);
+                return true;
+            }
+        }
+        return false;
     }
 
     private int countMatching(Predicate<ItemStack> match) {
@@ -470,8 +517,13 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
             || POWDER_TO_COLOR.containsKey(stack.getItem());
     }
 
-    /** Phase 6 will extend this to accept any fluid-storing item via capability lookup. */
+    /** Accepts vanilla buckets (full or empty) and any item that exposes a Fabric fluid storage
+     *  capability. Empty fluid-capable containers must pass so the drained cell can be written
+     *  back to this slot when {@link #tryDrainWater} finishes extracting — TR's exchange flow
+     *  calls back into canPlaceItem during the extraction. Opening a transaction here would also
+     *  recursively conflict with the outer transaction already open in tryDrainWater. */
     public static boolean isValidWaterInput(ItemStack stack) {
-        return stack.is(Items.WATER_BUCKET);
+        if (stack.is(Items.WATER_BUCKET) || stack.is(Items.BUCKET)) return true;
+        return FluidStorage.ITEM.find(stack, ContainerItemContext.withConstant(stack)) != null;
     }
 }

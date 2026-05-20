@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import com.kestalkayden.concretemixer.block.ConcreteMixerBlockEntities;
 import com.kestalkayden.concretemixer.block.ConcreteMixerBlocks;
+import com.kestalkayden.concretemixer.block.ConcreteMixerFluidHandler;
 import com.kestalkayden.concretemixer.client.ConcreteMixerScreen;
 import com.kestalkayden.concretemixer.menu.ConcreteMixerMenus;
 
@@ -15,6 +16,8 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 
@@ -32,10 +35,20 @@ public class ConcreteMixerNeoForge {
         ConcreteMixerMenus.MENUS.register(modBus);
 
         modBus.addListener(ConcreteMixerNeoForge::onBuildCreativeTabs);
+        modBus.addListener(ConcreteMixerNeoForge::onRegisterCapabilities);
 
         if (FMLEnvironment.getDist() == Dist.CLIENT) {
             modBus.addListener(ConcreteMixerNeoForge::onRegisterMenuScreens);
         }
+    }
+
+    /** Expose the water tank to pipe mods (Pipez, EnderIO, etc.) and HUD mods (Jade auto-reads
+     *  fluid capabilities) via NeoForge's unified-transfer Fluid block capability. */
+    private static void onRegisterCapabilities(RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(
+            Capabilities.Fluid.BLOCK,
+            ConcreteMixerBlockEntities.CONCRETE_MIXER_BE,
+            (be, side) -> new ConcreteMixerFluidHandler(be));
     }
 
     private static void onRegisterMenuScreens(RegisterMenuScreensEvent event) {

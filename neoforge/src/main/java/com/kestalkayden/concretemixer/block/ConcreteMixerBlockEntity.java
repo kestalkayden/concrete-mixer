@@ -23,6 +23,14 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.ItemContainerContents;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.transfer.ResourceHandler;
+import net.neoforged.neoforge.transfer.access.ItemAccess;
+import net.neoforged.neoforge.transfer.fluid.FluidResource;
+import net.neoforged.neoforge.transfer.item.ItemResource;
+import net.neoforged.neoforge.transfer.item.VanillaContainerWrapper;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -136,6 +144,17 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
     public int getProgress() { return progress; }
     public int getActiveMixTicks() { return activeMixTicks; }
 
+    /** Adds water to the tank, clamped to [0, TANK_CAPACITY_MB]. Negative amount drains.
+     *  Marks the BE dirty on any actual change. Used by the external fluid capability so pipe
+     *  mods (Pipez, etc.) and HUD mods (Jade) can read/write the tank. */
+    public void addWaterMb(int amount) {
+        int newAmount = Math.max(0, Math.min(TANK_CAPACITY_MB, waterMb + amount));
+        if (newAmount != waterMb) {
+            waterMb = newAmount;
+            setChanged();
+        }
+    }
+
     /** Status enum sent to the menu/screen for the GUI status line. */
     public static final int STATUS_IDLE = 0;
     public static final int STATUS_MIXING_RAW = 1;
@@ -185,7 +204,7 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         if (powered) return;
 
         boolean changed = false;
-        if (tryDrainBucket()) changed = true;
+        if (tryDrainWater()) changed = true;
 
         Optional<DyeColor> rawColor = tryMatchRawRecipe();
         Optional<DyeColor> powderColor = rawColor.isPresent() ? Optional.empty() : tryMatchPowderRecipe();
@@ -333,18 +352,45 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         }
     }
 
-    /** Drains one water bucket from the water slot into the tank, replacing with an empty bucket. */
-    private boolean tryDrainBucket() {
+    /** Drains water from the water slot into the tank. Returns true iff any mB was added.
+     *  Two paths:
+     *    1. Vanilla water bucket → fast path, atomic 1000 mB swap to empty bucket.
+     *    2. Any item with a NeoForge fluid item capability containing water (Tech Reborn cells,
+     *       Mekanism portable tanks, etc.) → extract up to remaining tank capacity. The slot-bound
+     *       ItemAccess lets the source item transform itself (cell → empty cell, etc.) on commit. */
+    private boolean tryDrainWater() {
         ItemStack stack = items.get(SLOT_WATER);
-        if (stack.isEmpty() || !stack.is(Items.WATER_BUCKET)) return false;
-        if (waterMb + 1000 > TANK_CAPACITY_MB) return false;
-        if (stack.getCount() == 1) {
-            items.set(SLOT_WATER, new ItemStack(Items.BUCKET));
-        } else {
-            stack.shrink(1);
+        if (stack.isEmpty()) return false;
+        int roomMb = TANK_CAPACITY_MB - waterMb;
+        if (roomMb <= 0) return false;
+
+        // Path A: vanilla water bucket — no transaction overhead.
+        if (stack.is(Items.WATER_BUCKET) && roomMb >= 1000) {
+            if (stack.getCount() == 1) {
+                items.set(SLOT_WATER, new ItemStack(Items.BUCKET));
+            } else {
+                stack.shrink(1);
+            }
+            waterMb += 1000;
+            return true;
         }
-        waterMb += 1000;
-        return true;
+
+        // Path B: any item exposing a fluid handler with water. Slot-bound ItemAccess writes
+        // the transformed item back to our BE slot when the transaction commits.
+        ResourceHandler<ItemResource> itemHandler = VanillaContainerWrapper.of(this);
+        ItemAccess access = ItemAccess.forHandlerIndex(itemHandler, SLOT_WATER);
+        ResourceHandler<FluidResource> fluidHandler = access.getCapability(Capabilities.Fluid.ITEM);
+        if (fluidHandler == null) return false;
+
+        try (Transaction tx = Transaction.openRoot()) {
+            int extracted = fluidHandler.extract(FluidResource.of(Fluids.WATER), roomMb, tx);
+            if (extracted > 0) {
+                tx.commit();
+                addWaterMb(extracted);
+                return true;
+            }
+        }
+        return false;
     }
 
     private int countMatching(Predicate<ItemStack> match) {
@@ -463,8 +509,13 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
             || POWDER_TO_COLOR.containsKey(stack.getItem());
     }
 
-    /** Phase 6 will extend this to accept any fluid-storing item via capability lookup. */
+    /** Accepts vanilla buckets (full or empty) and any item exposing a NeoForge fluid item
+     *  capability. Empty fluid-capable containers must pass so the drained cell can be written
+     *  back to this slot when {@link #tryDrainWater} finishes extracting. Opening a transaction
+     *  here would also recursively conflict with the outer transaction in tryDrainWater. */
     public static boolean isValidWaterInput(ItemStack stack) {
-        return stack.is(Items.WATER_BUCKET);
+        if (stack.is(Items.WATER_BUCKET) || stack.is(Items.BUCKET)) return true;
+        ItemAccess access = ItemAccess.forStack(stack);
+        return access.getCapability(Capabilities.Fluid.ITEM) != null;
     }
 }
