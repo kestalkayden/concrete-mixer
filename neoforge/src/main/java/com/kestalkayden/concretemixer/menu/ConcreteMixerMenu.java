@@ -20,22 +20,35 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
 
     public static final int DATA_PROGRESS = 0;
     public static final int DATA_WATER_MB = 1;
-    public static final int DATA_SIZE = 2;
+    public static final int DATA_MAX_PROGRESS = 2;
+    public static final int DATA_STATUS = 3;
+    public static final int DATA_SIZE = 4;
 
-    public static final int INPUT_ROW_Y = 17;
-    public static final int INPUT_X_START = 44;
-    public static final int WATER_SLOT_X = 8;
-    public static final int WATER_SLOT_Y = 53;
-    public static final int WATER_BAR_X = 26;
-    public static final int WATER_BAR_Y = 17;
-    public static final int WATER_BAR_W = 14;
-    public static final int WATER_BAR_H = 54;
-    public static final int ARROW_X = 95;
-    public static final int ARROW_Y = 36;
-    public static final int ARROW_W = 22;
-    public static final int OUTPUT_SLOT_X = 134;
-    public static final int OUTPUT_SLOT_Y = 35;
-    public static final int PLAYER_INV_Y = 84;
+    public static final int GUI_W = 176;
+    public static final int GUI_H = 184;
+
+    public static final int LABEL_INPUTS_Y = 18;
+    public static final int LABEL_WATER_Y = 48;
+    public static final int LABEL_STATUS_Y = 78;
+
+    public static final int INPUT_ROW_Y = 28;
+    public static final int INPUT_X_START = 10;
+    public static final int OUTPUT_SLOT_X = 144;
+    public static final int OUTPUT_SLOT_Y = INPUT_ROW_Y;
+
+    public static final int ARROW_X = 70;
+    public static final int ARROW_Y = 32;
+    public static final int ARROW_W = 56;
+    public static final int ARROW_H = 8;
+
+    public static final int WATER_SLOT_X = 10;
+    public static final int WATER_SLOT_Y = 58;
+    public static final int WATER_BAR_X = 32;
+    public static final int WATER_BAR_Y = 62;
+    public static final int WATER_BAR_W = 136;
+    public static final int WATER_BAR_H = 8;
+
+    public static final int PLAYER_INV_Y = 102;
 
     private final Container beContainer;
     private final ContainerData data;
@@ -52,6 +65,8 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
                 return switch (i) {
                     case DATA_PROGRESS -> be.getProgress();
                     case DATA_WATER_MB -> be.getWaterMb();
+                    case DATA_MAX_PROGRESS -> be.getActiveMixTicks();
+                    case DATA_STATUS -> be.getStatusCode();
                     default -> 0;
                 };
             }
@@ -100,6 +115,8 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
 
     public int getProgress() { return data.get(DATA_PROGRESS); }
     public int getWaterMb() { return data.get(DATA_WATER_MB); }
+    public int getMaxProgress() { return data.get(DATA_MAX_PROGRESS); }
+    public int getStatusCode() { return data.get(DATA_STATUS); }
 
     @Override
     public boolean stillValid(Player player) {

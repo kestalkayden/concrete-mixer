@@ -1,4 +1,19 @@
 {
   "block.concretemixer.concrete_mixer": "Concrete Mixer",
-  "container.concretemixer.concrete_mixer": "Concrete Mixer"
+  "container.concretemixer.concrete_mixer": "Concrete Mixer",
+
+  "gui.concretemixer.label.inputs": "Inputs:",
+  "gui.concretemixer.label.water": "Water:",
+  "gui.concretemixer.label.status": "Status:",
+
+  "gui.concretemixer.status.idle": "Idle",
+  "gui.concretemixer.status.mixing_raw": "Mixing",
+  "gui.concretemixer.status.mixing_powder": "Mixing (powder)",
+  "gui.concretemixer.status.need_water": "Needs water",
+  "gui.concretemixer.status.output_full": "Output full",
+  "gui.concretemixer.status.color_mismatch": "Color mismatch",
+  "gui.concretemixer.status.powered": "Disabled (redstone)",
+  "gui.concretemixer.status.invalid": "Invalid recipe",
+
+  "gui.concretemixer.tooltip.water_title": "Water Tank"
 }

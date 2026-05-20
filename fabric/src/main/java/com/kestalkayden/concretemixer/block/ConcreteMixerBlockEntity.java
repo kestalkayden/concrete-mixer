@@ -39,12 +39,22 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
     public static final int SLOT_OUTPUT = 4;
 
     public static final int TANK_CAPACITY_MB = 10_000;
-    public static final int WATER_PER_CRAFT_MB = 1000;
+
+    // Raw recipe: 4 sand + 4 gravel + 1 dye + 1000 mB → 4 concrete per 240 ticks (12 s).
+    public static final int RAW_MIX_TICKS = 240;
+    public static final int RAW_WATER_PER_CRAFT_MB = 1000;
+    public static final int RAW_OUTPUT_PER_CRAFT = 4;
     public static final int SAND_PER_CRAFT = 4;
     public static final int GRAVEL_PER_CRAFT = 4;
     public static final int DYE_PER_CRAFT = 1;
-    public static final int OUTPUT_PER_CRAFT = 4;
-    public static final int MIX_TICKS = 160;
+
+    // Powder shortcut: 1 powder + 250 mB → 1 concrete per 60 ticks (3 s).
+    // Throughput matches the raw path (~1 concrete every 3 s); the small batch lets players
+    // start with as little as one powder, matching vanilla "1 powder + water source = 1 concrete".
+    public static final int POWDER_MIX_TICKS = 60;
+    public static final int POWDER_WATER_PER_CRAFT_MB = 250;
+    public static final int POWDER_INPUT_PER_CRAFT = 1;
+    public static final int POWDER_OUTPUT_PER_CRAFT = 1;
 
     private static final int[] TOP_SLOTS = new int[]{SLOT_INPUT_A, SLOT_INPUT_B, SLOT_INPUT_C};
     private static final int[] SIDE_SLOTS = new int[]{SLOT_INPUT_A, SLOT_INPUT_B, SLOT_INPUT_C, SLOT_WATER};
@@ -112,6 +122,11 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
     private int waterMb = 0;
     private int progress = 0;
     private boolean powered = false;
+    /** Ticks the current mode needs to complete one craft. 0 = no recipe active right now.
+     *  Synced to the client via ContainerData so the progress arrow scales correctly — raw and
+     *  powder cycles have different durations (160 vs 40 ticks). Not persisted; recomputed
+     *  every tick from the inputs. */
+    private int activeMixTicks = 0;
 
     public ConcreteMixerBlockEntity(BlockPos pos, BlockState state) {
         super(ConcreteMixerBlockEntities.CONCRETE_MIXER_BE, pos, state);
@@ -119,6 +134,45 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
 
     public int getWaterMb() { return waterMb; }
     public int getProgress() { return progress; }
+    public int getActiveMixTicks() { return activeMixTicks; }
+
+    /** Status enum sent to the menu/screen for the GUI status line.
+     *  Kept as ints since ContainerData can only sync shorts. */
+    public static final int STATUS_IDLE = 0;
+    public static final int STATUS_MIXING_RAW = 1;
+    public static final int STATUS_MIXING_POWDER = 2;
+    public static final int STATUS_NEED_WATER = 3;
+    public static final int STATUS_OUTPUT_FULL = 4;
+    public static final int STATUS_COLOR_MISMATCH = 5;
+    public static final int STATUS_POWERED = 6;
+    public static final int STATUS_INVALID = 7;
+
+    /** Resolves the current state into a status code for the screen to display. */
+    public int getStatusCode() {
+        if (powered) return STATUS_POWERED;
+        boolean anyInput = !items.get(SLOT_INPUT_A).isEmpty()
+                        || !items.get(SLOT_INPUT_B).isEmpty()
+                        || !items.get(SLOT_INPUT_C).isEmpty();
+        if (!anyInput) return STATUS_IDLE;
+
+        Optional<DyeColor> rawColor = tryMatchRawRecipe();
+        Optional<DyeColor> powderColor = rawColor.isPresent() ? Optional.empty() : tryMatchPowderRecipe();
+        boolean powderMode = powderColor.isPresent() && rawColor.isEmpty();
+        Optional<DyeColor> craftColor = rawColor.isPresent() ? rawColor : powderColor;
+        if (craftColor.isEmpty()) return STATUS_INVALID;
+
+        int waterNeeded = powderMode ? POWDER_WATER_PER_CRAFT_MB : RAW_WATER_PER_CRAFT_MB;
+        if (waterMb < waterNeeded) return STATUS_NEED_WATER;
+
+        int outputNeeded = powderMode ? POWDER_OUTPUT_PER_CRAFT : RAW_OUTPUT_PER_CRAFT;
+        Item concrete = COLOR_TO_CONCRETE.get(craftColor.get());
+        ItemStack output = items.get(SLOT_OUTPUT);
+        if (!output.isEmpty()) {
+            if (!output.is(concrete)) return STATUS_COLOR_MISMATCH;
+            if (output.getCount() + outputNeeded > output.getMaxStackSize()) return STATUS_OUTPUT_FULL;
+        }
+        return powderMode ? STATUS_MIXING_POWDER : STATUS_MIXING_RAW;
+    }
 
     public void setPowered(boolean powered) {
         if (this.powered != powered) {
@@ -130,25 +184,22 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
     // --- Tick ---
 
     public void serverTick(ServerLevel level, BlockPos pos, BlockState state) {
-        // Redstone signal pauses operation; progress is preserved so removing the signal resumes
-        // mid-batch rather than restarting. Bucket fill is also paused — full hopper feed should
-        // be stoppable with a single lever.
         if (powered) return;
 
         boolean changed = false;
-
-        // Bucket → tank fill (Phase 5). External capability path (mod canisters) is Phase 6.
         if (tryDrainBucket()) changed = true;
 
-        // Try raw recipe first; if it doesn't match, fall back to the powder shortcut.
         Optional<DyeColor> rawColor = tryMatchRawRecipe();
         Optional<DyeColor> powderColor = rawColor.isPresent() ? Optional.empty() : tryMatchPowderRecipe();
+        boolean powderMode = powderColor.isPresent() && rawColor.isEmpty();
         Optional<DyeColor> craftColor = rawColor.isPresent() ? rawColor : powderColor;
-        boolean canCraft = craftColor.isPresent() && hasWaterAndOutputRoom(craftColor.get());
+        boolean canCraft = craftColor.isPresent() && hasWaterAndOutputRoom(craftColor.get(), powderMode);
+        int mixTicks = powderMode ? POWDER_MIX_TICKS : RAW_MIX_TICKS;
 
         if (canCraft) {
+            activeMixTicks = mixTicks;
             progress++;
-            if (progress >= MIX_TICKS) {
+            if (progress >= mixTicks) {
                 if (rawColor.isPresent()) performRawCraft(rawColor.get());
                 else performPowderCraft(powderColor.get());
                 progress = 0;
@@ -156,7 +207,10 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
             changed = true;
         } else if (progress > 0) {
             progress = 0;
+            activeMixTicks = 0;
             changed = true;
+        } else {
+            activeMixTicks = 0;
         }
 
         boolean shouldBeLit = progress > 0;
@@ -205,8 +259,9 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         return Optional.of(color);
     }
 
-    /** Powder shortcut: ONE input slot holds ≥4 concrete powder, others empty. Mixed-with-powder
-     *  arrangements (powder + sand, etc.) are intentionally rejected as ambiguous. */
+    /** Powder shortcut: input slots contain only powder (any of 3 slots), all the same color,
+     *  total ≥ POWDER_INPUT_PER_CRAFT. Mixed-with-powder arrangements (powder + sand, etc.) are
+     *  intentionally rejected as ambiguous. */
     private Optional<DyeColor> tryMatchPowderRecipe() {
         DyeColor color = null;
         int powderCount = 0;
@@ -214,22 +269,24 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
             ItemStack stack = items.get(slot);
             if (stack.isEmpty()) continue;
             DyeColor c = POWDER_TO_COLOR.get(stack.getItem());
-            if (c == null) return Optional.empty();  // non-powder item present → not powder mode
-            if (color != null && color != c) return Optional.empty();  // multiple colors → ambiguous
+            if (c == null) return Optional.empty();
+            if (color != null && color != c) return Optional.empty();
             color = c;
             powderCount += stack.getCount();
         }
-        if (color == null || powderCount < OUTPUT_PER_CRAFT) return Optional.empty();
+        if (color == null || powderCount < POWDER_INPUT_PER_CRAFT) return Optional.empty();
         return Optional.of(color);
     }
 
-    private boolean hasWaterAndOutputRoom(DyeColor color) {
-        if (waterMb < WATER_PER_CRAFT_MB) return false;
+    private boolean hasWaterAndOutputRoom(DyeColor color, boolean powderMode) {
+        int waterNeeded = powderMode ? POWDER_WATER_PER_CRAFT_MB : RAW_WATER_PER_CRAFT_MB;
+        int outputNeeded = powderMode ? POWDER_OUTPUT_PER_CRAFT : RAW_OUTPUT_PER_CRAFT;
+        if (waterMb < waterNeeded) return false;
         Item concrete = COLOR_TO_CONCRETE.get(color);
         ItemStack output = items.get(SLOT_OUTPUT);
         if (output.isEmpty()) return true;
         if (!output.is(concrete)) return false;
-        return output.getCount() + OUTPUT_PER_CRAFT <= output.getMaxStackSize();
+        return output.getCount() + outputNeeded <= output.getMaxStackSize();
     }
 
     // --- Crafting ---
@@ -238,13 +295,12 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
         consumeFromInputs(this::isSand, SAND_PER_CRAFT);
         consumeFromInputs(this::isGravel, GRAVEL_PER_CRAFT);
         consumeFromInputs(s -> DYE_TO_COLOR.get(s.getItem()) == color, DYE_PER_CRAFT);
-        waterMb -= WATER_PER_CRAFT_MB;
-        addToOutput(COLOR_TO_CONCRETE.get(color), OUTPUT_PER_CRAFT);
+        waterMb -= RAW_WATER_PER_CRAFT_MB;
+        addToOutput(COLOR_TO_CONCRETE.get(color), RAW_OUTPUT_PER_CRAFT);
     }
 
     private void performPowderCraft(DyeColor color) {
-        Item powderItem = items.get(SLOT_INPUT_A).getItem();  // any matching slot works
-        // Find the actual powder item present (since we accept it in any of the 3 slots).
+        Item powderItem = null;
         for (int slot = SLOT_INPUT_A; slot <= SLOT_INPUT_C; slot++) {
             ItemStack stack = items.get(slot);
             if (!stack.isEmpty() && POWDER_TO_COLOR.get(stack.getItem()) == color) {
@@ -252,10 +308,11 @@ public class ConcreteMixerBlockEntity extends RandomizableContainerBlockEntity i
                 break;
             }
         }
+        if (powderItem == null) return;  // defensive — match was validated upstream
         final Item match = powderItem;
-        consumeFromInputs(s -> s.is(match), OUTPUT_PER_CRAFT);
-        waterMb -= WATER_PER_CRAFT_MB;
-        addToOutput(COLOR_TO_CONCRETE.get(color), OUTPUT_PER_CRAFT);
+        consumeFromInputs(s -> s.is(match), POWDER_INPUT_PER_CRAFT);
+        waterMb -= POWDER_WATER_PER_CRAFT_MB;
+        addToOutput(COLOR_TO_CONCRETE.get(color), POWDER_OUTPUT_PER_CRAFT);
     }
 
     private void addToOutput(Item item, int count) {

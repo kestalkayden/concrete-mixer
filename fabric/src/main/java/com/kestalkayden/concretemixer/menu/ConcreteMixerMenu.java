@@ -20,23 +20,41 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
 
     public static final int DATA_PROGRESS = 0;
     public static final int DATA_WATER_MB = 1;
-    public static final int DATA_SIZE = 2;
+    public static final int DATA_MAX_PROGRESS = 2;
+    public static final int DATA_STATUS = 3;
+    public static final int DATA_SIZE = 4;
 
-    // Slot positions — referenced by Screen for label/widget alignment
-    public static final int INPUT_ROW_Y = 17;
-    public static final int INPUT_X_START = 44;        // first of three input slots
-    public static final int WATER_SLOT_X = 8;
-    public static final int WATER_SLOT_Y = 53;
-    public static final int WATER_BAR_X = 26;          // vertical water bar
-    public static final int WATER_BAR_Y = 17;
-    public static final int WATER_BAR_W = 14;
-    public static final int WATER_BAR_H = 54;
-    public static final int ARROW_X = 95;
-    public static final int ARROW_Y = 36;
-    public static final int ARROW_W = 22;
-    public static final int OUTPUT_SLOT_X = 134;
-    public static final int OUTPUT_SLOT_Y = 35;
-    public static final int PLAYER_INV_Y = 84;
+    // Layout — recipe-card / spec-sheet style. GUI is 176x184 to make room for section labels
+    // and a status line under the arrow.
+    public static final int GUI_W = 176;
+    public static final int GUI_H = 184;
+
+    // Section label Y positions
+    public static final int LABEL_INPUTS_Y = 18;
+    public static final int LABEL_WATER_Y = 48;
+    public static final int LABEL_STATUS_Y = 78;
+
+    // Top row: inputs + arrow + output
+    public static final int INPUT_ROW_Y = 28;
+    public static final int INPUT_X_START = 10;          // first of three input slots, 18px apart
+    public static final int OUTPUT_SLOT_X = 144;
+    public static final int OUTPUT_SLOT_Y = INPUT_ROW_Y;
+
+    // Long horizontal arrow with triangular tip
+    public static final int ARROW_X = 70;
+    public static final int ARROW_Y = 32;
+    public static final int ARROW_W = 56;                // includes triangle tip
+    public static final int ARROW_H = 8;
+
+    // Middle row: water slot + horizontal water bar spanning the GUI width
+    public static final int WATER_SLOT_X = 10;
+    public static final int WATER_SLOT_Y = 58;
+    public static final int WATER_BAR_X = 32;
+    public static final int WATER_BAR_Y = 62;
+    public static final int WATER_BAR_W = 136;
+    public static final int WATER_BAR_H = 8;
+
+    public static final int PLAYER_INV_Y = 102;
 
     private final Container beContainer;
     private final ContainerData data;
@@ -53,6 +71,8 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
                 return switch (i) {
                     case DATA_PROGRESS -> be.getProgress();
                     case DATA_WATER_MB -> be.getWaterMb();
+                    case DATA_MAX_PROGRESS -> be.getActiveMixTicks();
+                    case DATA_STATUS -> be.getStatusCode();
                     default -> 0;
                 };
             }
@@ -105,6 +125,8 @@ public class ConcreteMixerMenu extends AbstractContainerMenu {
 
     public int getProgress() { return data.get(DATA_PROGRESS); }
     public int getWaterMb() { return data.get(DATA_WATER_MB); }
+    public int getMaxProgress() { return data.get(DATA_MAX_PROGRESS); }
+    public int getStatusCode() { return data.get(DATA_STATUS); }
 
     @Override
     public boolean stillValid(Player player) {
